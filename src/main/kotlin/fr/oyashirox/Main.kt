@@ -7,7 +7,7 @@ import jcuda.driver.JCudaDriver.*
 import kotlin.system.measureTimeMillis
 
 fun main(args: Array<String>) {
-    val numElements = 1 shl 20
+    val numElements = 1 shl 27
 
     // Allocate and fill the host input data
     val hostInputA = FloatArray(numElements)
@@ -17,18 +17,14 @@ fun main(args: Array<String>) {
         hostInputB[i] = i.toFloat()
     }
 
-    var result = FloatArray(0)
-    var time = measureTimeMillis {
-        result = executeOnGPU(hostInputA, hostInputB)
-    }
-    var passed = checkResult(result)
-    println("Test GPU ${if(passed) "SUCCESS" else "FAILED"} in $time ms for $numElements elements")
+    var result: Pair<FloatArray, Long>
+    result = executeOnGPU(hostInputA, hostInputB)
+    var passed = checkResult(result.first)
+    println("Test GPU ${if (passed) "SUCCESS" else "FAILED"} in ${result.second} ms for $numElements elements")
 
-    time = measureTimeMillis {
-        result = executeOnCPU(hostInputA, hostInputB)
-    }
-    passed = checkResult(result)
-    println("Test CPU ${if(passed) "SUCCESS" else "FAILED"} in $time ms for $numElements elements")
+    result = executeOnCPU(hostInputA, hostInputB)
+    passed = checkResult(result.first)
+    println("Test CPU ${if (passed) "SUCCESS" else "FAILED"} in ${result.second} ms for $numElements elements")
 
 }
 
@@ -46,10 +42,10 @@ fun checkResult(result: FloatArray): Boolean {
         }
     }
 
-   return passed
+    return passed
 }
 
-fun executeOnGPU(hostInputA: FloatArray, hostInputB: FloatArray): FloatArray {
+fun executeOnGPU(hostInputA: FloatArray, hostInputB: FloatArray): Pair<FloatArray, Long> {
     val numElements = hostInputA.size
     val filePath = object : Any() {}.javaClass
             .getResource("cudaKernel.ptx")
@@ -95,14 +91,16 @@ fun executeOnGPU(hostInputA: FloatArray, hostInputB: FloatArray): FloatArray {
     val blockSizeX = 256
     val gridSizeX = Math.ceil(numElements.toDouble() / blockSizeX).toInt()
 
-    cuLaunchKernel(function,
-            gridSizeX, 1, 1, // Grid dimension
-            blockSizeX, 1, 1, // Block dimension
-            0, null // Kernel- and extra parameters
-            , // Shared memory size and stream
-            kernelParameters, null
-    )
-    cuCtxSynchronize()
+    val innerTime = measureTimeMillis {
+        cuLaunchKernel(function,
+                gridSizeX, 1, 1, // Grid dimension
+                blockSizeX, 1, 1, // Block dimension
+                0, null // Kernel- and extra parameters
+                , // Shared memory size and stream
+                kernelParameters, null
+        )
+        cuCtxSynchronize()
+    }
 
     // Allocate host output memory and copy the device output
     // to the host.
@@ -115,14 +113,16 @@ fun executeOnGPU(hostInputA: FloatArray, hostInputB: FloatArray): FloatArray {
     cuMemFree(deviceInputB)
     cuMemFree(deviceOutput)
 
-    return hostOutput
+    return hostOutput to innerTime
 }
 
-fun executeOnCPU(hostInputA: FloatArray, hostInputB: FloatArray): FloatArray  {
+fun executeOnCPU(hostInputA: FloatArray, hostInputB: FloatArray): Pair<FloatArray, Long> {
     val numElements = hostInputA.size
     val result = FloatArray(numElements)
-    for (i in 0 until numElements) {
-        result[i] = hostInputA[i] + hostInputB[i]
+    val innerTime = measureTimeMillis {
+        for (i in 0 until numElements) {
+            result[i] = hostInputA[i] + hostInputB[i]
+        }
     }
-    return result
+    return result to innerTime
 }
