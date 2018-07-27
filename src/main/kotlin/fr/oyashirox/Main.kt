@@ -1,128 +1,137 @@
 package fr.oyashirox
 
+import fr.oyashirox.math.Image
+import fr.oyashirox.math.Vector
+import fr.oyashirox.raytracing.Camera
 import jcuda.Pointer
 import jcuda.Sizeof
 import jcuda.driver.*
 import jcuda.driver.JCudaDriver.*
-import kotlin.system.measureTimeMillis
+import java.awt.Desktop
+import java.awt.image.BufferedImage
+import java.nio.file.Paths
+import javax.imageio.ImageIO
 
 fun main(args: Array<String>) {
-    val numElements = 1 shl 27
+       val camera = Camera(
+            lookfrom = Vector(-2.0, 2.0, 1.0),
+            lookat = Vector(0.0, 0.0, -1.0)
+    )
 
-    // Allocate and fill the host input data
-    val hostInputA = FloatArray(numElements)
-    val hostInputB = FloatArray(numElements)
-    for (i in 0 until numElements) {
-        hostInputA[i] = i.toFloat()
-        hostInputB[i] = i.toFloat()
-    }
+    // Host memory
+    val width = 1920
+    val height = 1080
+    val colors = FloatArray(width * height * 3) { 0.5f }
+    val cameraPos = camera.lookfrom.toFloatArray()
+    val cameraLowerLeft = camera.lowerLeft.toFloatArray()
+    val cameraHorizontal = camera.horizontal.toFloatArray()
+    val cameraVertical = camera.vertical.toFloatArray()
+    val world = floatArrayOf(
+            0.0f, 0.0f, -1.0f, 0.5f
+    )
+    val numberOfSphere = 1
 
-    var result: Pair<FloatArray, Long>
-    result = executeOnGPU(hostInputA, hostInputB)
-    var passed = checkResult(result.first)
-    println("Test GPU ${if (passed) "SUCCESS" else "FAILED"} in ${result.second} ms for $numElements elements")
-
-    result = executeOnCPU(hostInputA, hostInputB)
-    passed = checkResult(result.first)
-    println("Test CPU ${if (passed) "SUCCESS" else "FAILED"} in ${result.second} ms for $numElements elements")
-
-}
-
-fun checkResult(result: FloatArray): Boolean {
-    // Verify the result
-    var passed = true
-    for (i in 0 until result.size) {
-        val expected = (i + i).toFloat()
-        if (Math.abs(result[i] - expected) > 1e-5) {
-            println(
-                    "At index " + i + " found " + result[i] +
-                            " but expected " + expected)
-            passed = false
-            break
-        }
-    }
-
-    return passed
-}
-
-fun executeOnGPU(hostInputA: FloatArray, hostInputB: FloatArray): Pair<FloatArray, Long> {
-    val numElements = hostInputA.size
+    //cuda init
+    var status: Int
     val filePath = object : Any() {}.javaClass
-            .getResource("cudaKernel.ptx")
+            .getResource("cudaRaytracing.ptx")
             .path.drop(1) // remove leading / (no idea why it is here)
 
+    JCudaDriver.setExceptionsEnabled(true)
     // Initialize the driver and create a context for the first device.
     cuInit(0)
     val device = CUdevice()
     cuDeviceGet(device, 0)
     val context = CUcontext()
-    cuCtxCreate(context, 0, device)
+    status = cuCtxCreate(context, 0, device)
+    println("status cuCtxCreate: $status")
 
     val module = CUmodule()
-    JCudaDriver.cuModuleLoad(module, filePath)
+    status = JCudaDriver.cuModuleLoad(module, filePath)
+    println("status cuModuleLoad: $status")
+
     val function = CUfunction()
-    JCudaDriver.cuModuleGetFunction(function, module, "add")
+    status = JCudaDriver.cuModuleGetFunction(function, module, "raytracing")
+    println("status cuModuleGetFunction: $status")
 
     // Allocate the device input data, and copy the
     // host input data to the device
-    val deviceInputA = CUdeviceptr()
-    cuMemAlloc(deviceInputA, (numElements * Sizeof.FLOAT).toLong())
-    cuMemcpyHtoD(deviceInputA, Pointer.to(hostInputA),
-            (numElements * Sizeof.FLOAT).toLong())
-    val deviceInputB = CUdeviceptr()
-    cuMemAlloc(deviceInputB, (numElements * Sizeof.FLOAT).toLong())
-    cuMemcpyHtoD(deviceInputB, Pointer.to(hostInputB),
-            (numElements * Sizeof.FLOAT).toLong())
+    val deviceCameraPos = CUdeviceptr()
+    cuMemAlloc(deviceCameraPos, (3 * Sizeof.FLOAT).toLong())
+    cuMemcpyHtoD(deviceCameraPos, Pointer.to(cameraPos),
+            (3 * Sizeof.FLOAT).toLong())
+    val deviceCameraLowerLeft = CUdeviceptr()
+    cuMemAlloc(deviceCameraLowerLeft, (3 * Sizeof.FLOAT).toLong())
+    cuMemcpyHtoD(deviceCameraLowerLeft, Pointer.to(cameraLowerLeft),
+            (3 * Sizeof.FLOAT).toLong())
+    val deviceCameraHorizontal = CUdeviceptr()
+    cuMemAlloc(deviceCameraHorizontal, (3 * Sizeof.FLOAT).toLong())
+    cuMemcpyHtoD(deviceCameraHorizontal, Pointer.to(cameraHorizontal),
+            (3 * Sizeof.FLOAT).toLong())
+    val deviceCameraVertical = CUdeviceptr()
+    cuMemAlloc(deviceCameraVertical, (3 * Sizeof.FLOAT).toLong())
+    cuMemcpyHtoD(deviceCameraVertical, Pointer.to(cameraVertical),
+            (3 * Sizeof.FLOAT).toLong())
+
+    val deviceWorld = CUdeviceptr()
+    cuMemAlloc(deviceWorld, (numberOfSphere * 4 * Sizeof.FLOAT).toLong())
+    cuMemcpyHtoD(deviceWorld, Pointer.to(world),
+            (numberOfSphere * 4 * Sizeof.FLOAT).toLong())
 
     // Allocate device output memory
-    val deviceOutput = CUdeviceptr()
-    cuMemAlloc(deviceOutput, (numElements * Sizeof.FLOAT).toLong())
+    val deviceColorsOutput = CUdeviceptr()
+    cuMemAlloc(deviceColorsOutput, (width * height * 3 * Sizeof.FLOAT).toLong())
 
     // Set up the kernel parameters: A pointer to an array
     // of pointers which point to the actual values.
     val kernelParameters = Pointer.to(
-            Pointer.to(intArrayOf(numElements)),
-            Pointer.to(deviceInputA),
-            Pointer.to(deviceInputB),
-            Pointer.to(deviceOutput)
-    )
+            Pointer.to(intArrayOf(width)),
+            Pointer.to(intArrayOf(height)),
+            Pointer.to(deviceColorsOutput),
+            Pointer.to(deviceCameraPos),
+            Pointer.to(deviceCameraLowerLeft),
+            Pointer.to(deviceCameraHorizontal),
+            Pointer.to(deviceCameraVertical),
+
+            Pointer.to(deviceWorld),
+            Pointer.to(intArrayOf(numberOfSphere))
+            )
 
     // Call the kernel function.
     val blockSizeX = 256
-    val gridSizeX = Math.ceil(numElements.toDouble() / blockSizeX).toInt()
+    val gridSizeX = Math.ceil((width * height).toDouble() / blockSizeX).toInt()
 
-    val innerTime = measureTimeMillis {
-        cuLaunchKernel(function,
-                gridSizeX, 1, 1, // Grid dimension
-                blockSizeX, 1, 1, // Block dimension
-                0, null // Kernel- and extra parameters
-                , // Shared memory size and stream
-                kernelParameters, null
-        )
-        cuCtxSynchronize()
-    }
+    status = cuLaunchKernel(function,
+            gridSizeX, 1, 1, // Grid dimension
+            blockSizeX, 1, 1, // Block dimension
+            0, null // Kernel- and extra parameters
+            , // Shared memory size and stream
+            kernelParameters, null
+    )
+    cuCtxSynchronize()
 
-    // Allocate host output memory and copy the device output
-    // to the host.
-    val hostOutput = FloatArray(numElements)
-    cuMemcpyDtoH(Pointer.to(hostOutput), deviceOutput,
-            (numElements * Sizeof.FLOAT).toLong())
+    println("status cuLaunchKernel: $status")
+
+    cuMemcpyDtoH(Pointer.to(colors), deviceColorsOutput,
+            (width * height * 3 * Sizeof.FLOAT).toLong())
+
+
+
+    val completeImage = Image(width, height)
+    completeImage.setData(colors)
+    val bufferedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+    bufferedImage.setRGB(0, 0, width, height, completeImage.getColorArray().map { it.argbColor }.toIntArray(), 0, width)
+
+    val file = Paths.get(".", "generated.png").toAbsolutePath().normalize().toFile()
+    println("Image saved to : ${file.absolutePath}")
+    ImageIO.write(bufferedImage, "png", file)
+    Desktop.getDesktop().open(file)
 
     // Clean up.
-    cuMemFree(deviceInputA)
-    cuMemFree(deviceInputB)
-    cuMemFree(deviceOutput)
-
-    return hostOutput to innerTime
-}
-
-fun executeOnCPU(hostInputA: FloatArray, hostInputB: FloatArray): Pair<FloatArray, Long> {
-    val numElements = hostInputA.size
-    val result = FloatArray(numElements)
-    val innerTime = measureTimeMillis {
-        for (i in 0 until numElements) {
-            result[i] = hostInputA[i] + hostInputB[i]
-        }
-    }
-    return result to innerTime
+    cuMemFree(deviceCameraPos)
+    cuMemFree(deviceCameraLowerLeft)
+    cuMemFree(deviceCameraHorizontal)
+    cuMemFree(deviceCameraVertical)
+    cuMemFree(deviceWorld)
+    cuMemFree(deviceColorsOutput)
 }
