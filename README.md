@@ -1,5 +1,7 @@
-# Cuda
-Testing cuda in kotlin with jcuda
+# Cuda Raytracing
+Testing cuda in kotlin with jcuda to do some raytracing.
 
-# current generated image: 
+If you have java installed, you should be able to run with
+`gradlew run`.
+### current generated image: 
 ![generated image](generated.png)

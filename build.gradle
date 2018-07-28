@@ -21,9 +21,11 @@ repositories {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
-    implementation "org.jcuda:jcuda:0.9.0d"
     implementation files("libs/jcuda-natives-0.9.0d-windows-x86_64.jar")
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    implementation("org.jcuda:jcuda:0.9.0d") {
+        transitive = false
+    }
 }
 
 compileKotlin {
@@ -32,3 +34,5 @@ compileKotlin {
 compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"
 }
+
+//TODO create a task to compile .cu when compiling
