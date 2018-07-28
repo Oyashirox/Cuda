@@ -32,7 +32,6 @@ fun main(args: Array<String>) {
     val numberOfSphere = 1
 
     //cuda init
-    var status: Int
     val filePath = object : Any() {}.javaClass
             .getResource("cudaRaytracing.ptx")
             .path.drop(1) // remove leading / (no idea why it is here)
@@ -43,16 +42,13 @@ fun main(args: Array<String>) {
     val device = CUdevice()
     cuDeviceGet(device, 0)
     val context = CUcontext()
-    status = cuCtxCreate(context, 0, device)
-    println("status cuCtxCreate: $status")
+    cuCtxCreate(context, 0, device)
 
     val module = CUmodule()
-    status = JCudaDriver.cuModuleLoad(module, filePath)
-    println("status cuModuleLoad: $status")
+   JCudaDriver.cuModuleLoad(module, filePath)
 
     val function = CUfunction()
-    status = JCudaDriver.cuModuleGetFunction(function, module, "raytracing")
-    println("status cuModuleGetFunction: $status")
+    JCudaDriver.cuModuleGetFunction(function, module, "raytracing")
 
     // Allocate the device input data, and copy the
     // host input data to the device
@@ -101,7 +97,7 @@ fun main(args: Array<String>) {
     val blockSizeX = 256
     val gridSizeX = Math.ceil((width * height).toDouble() / blockSizeX).toInt()
 
-    status = cuLaunchKernel(function,
+    cuLaunchKernel(function,
             gridSizeX, 1, 1, // Grid dimension
             blockSizeX, 1, 1, // Block dimension
             0, null // Kernel- and extra parameters
@@ -109,8 +105,6 @@ fun main(args: Array<String>) {
             kernelParameters, null
     )
     cuCtxSynchronize()
-
-    println("status cuLaunchKernel: $status")
 
     cuMemcpyDtoH(Pointer.to(colors), deviceColorsOutput,
             (width * height * 3 * Sizeof.FLOAT).toLong())

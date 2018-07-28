@@ -71,7 +71,7 @@ __device__ void hit(float rayPos[], float rayDir[], float* worldSphere, int sphe
 }
 
 extern "C"
-// don't forget to compile with "nvcc -ptx cudaRaytracing.cu -o cudaRaytracing.ptx
+// don't forget to compile with "nvcc -ptx cudaRaytracing.cu -o cudaRaytracing.ptx"
 // And to move the ptx file in the resources !
 /** @param width image width
     @param height image height
@@ -84,26 +84,31 @@ __global__ void raytracing(
     float* world, int numberOfSphere) {
     int index = blockIdx.x * blockDim.x + threadIdx.x; // index is the pixel number as in a 1D array
     int stride = blockDim.x * gridDim.x;
+    int samples = 1000;
+    int sqrtSample = (int)sqrtf(samples);
     int x = index % width;
     int y = index / width;
-    float u = (float)x / width;
-    float v = 1.0 - ((float)y / height);
     float normal[3];
-
     float rayDirection[3] = {0.0, 0.0, 0.0}; // direction x, y, z
 
-    for (int i = index; i < width * height; i += stride) {
-        convertToRay(u, v, rayDirection, cameraPos, cameraLowerLeft, cameraHorizontal, cameraVertical);
-        hit(cameraPos, rayDirection, world, numberOfSphere, normal);
-        if(normal[0] != 0.0 || normal[1] != 0.0 || normal[2] != 0.0 ) {
-            colors[index * 3] = normal[0];
-            colors[index * 3 + 1] = normal[1];
-            colors[index * 3 + 2] = normal[2];
-        } else {
-            colors[index * 3] = 0.0;
-            colors[index * 3 + 1] = 0.0;
-            colors[index * 3 + 2] = 0.0;
-        }
 
+    for (int i = index; i < width * height; i += stride) {
+        for(int sample = 0; sample < samples; ++sample) {
+            float innerU = ((float)(sample % sqrtSample)) / sqrtSample;// subdivide a pixel in 10 horizontally
+            float innerV = ((float)(sample / sqrtSample)) / sqrtSample;// subdivide a pixel in 10 vertically
+            float u = ((float)x + innerU)/ width;
+            float v = 1.0 - (((float)y  + innerV) / height);
+
+            convertToRay(u, v, rayDirection, cameraPos, cameraLowerLeft, cameraHorizontal, cameraVertical);
+            hit(cameraPos, rayDirection, world, numberOfSphere, normal);
+            if(normal[0] != 0.0 || normal[1] != 0.0 || normal[2] != 0.0 ) {
+                colors[index * 3] += (normal[0] + 1.0) / 2;
+                colors[index * 3 + 1] += (normal[1] + 1.0) / 2;
+                colors[index * 3 + 2] += (normal[2] + 1.0) / 2;
+            }
+        }
+        colors[index * 3] /= samples;
+        colors[index * 3 + 1] /= samples;
+        colors[index * 3 + 2] /= samples;
     }
 }
