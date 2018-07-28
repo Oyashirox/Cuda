@@ -35,4 +35,12 @@ compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"
 }
 
-//TODO create a task to compile .cu when compiling
+task compileCuda(type: Exec) {
+    description 'Compile cuda .cu source using nvcc'
+
+    workingDir = "src/main/resources/fr/oyashirox"
+
+    commandLine 'nvcc', '-ptx', 'cudaRaytracing.cu', '-o', 'cudaRaytracing.ptx'
+}
+
+compileKotlin.dependsOn compileCuda
